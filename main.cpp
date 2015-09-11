@@ -148,6 +148,8 @@ int main(int argc, char **argv) {
             }
         }
         
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        
         auto t1 = Time::now();
         d = t1 - t0;
         delta = d.count();
