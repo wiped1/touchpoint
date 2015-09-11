@@ -23,7 +23,6 @@
  */
 
 #include <iostream>
-#include <map>
 #include <vector>
 #include <chrono>
 #include <thread> 
@@ -79,15 +78,22 @@ int main(int argc, char **argv) {
         return 1;
     }
     
-    double moveCounterX = 0;
-    double moveCounterY = 0;
-    
     std::vector<TouchPoint> touchPoints;
     // MT communication protocol report contact info for each specific slot one slot at a time
     // first it specifies slot value, if there are more than one contact points, then it sends that slot info
     int currentSlot = 0;
     
+    using Time = std::chrono::high_resolution_clock;
+    using duration = std::chrono::duration<double>;
+    duration d;
+    double delta;
+    
+    // X and Y accumulators, due to the integer nature of xdo mouse control, we have to increment relative directions 
+    double accX = 0.0;
+    double accY = 0.0;
+    
     while (1) {
+        auto t0 = Time::now();
         do {
             input_event ev;
             rc = libevdev_next_event(dev, LIBEVDEV_READ_FLAG_NORMAL, &ev);
@@ -99,25 +105,52 @@ int main(int argc, char **argv) {
         if (touchPoints.size() == 1) {
             auto tp = getTouchPoint(touchPoints, currentSlot);
             if (tp) {
-                int dirX = tp->absX - tp->originX;
-                int dirY = tp->absY - tp->originY;
-                double length = std::sqrt(dirX*dirX + dirY*dirY) / 100;
-                
-                moveCounterX += dirX * 0.1 * std::min(1.0, length); // add delta, remove sleep
-                moveCounterY += dirY * 0.1 * std::min(1.0, length); // add delta, remove sleep
-                
-                if (std::abs(moveCounterX) > 1) {
-                    xdo_move_mouse_relative(xdo, moveCounterX, 0);
-                    moveCounterX = 0;
+                int vX = tp->absX - tp->originX; // raw input difference
+                int vY = tp->absY - tp->originY; // raw input difference
+                double length = std::sqrt(vX*vX + vY*vY);       // vector length
+                double dirX = static_cast<double>(vX) / length; // normalized vector direction X
+                double dirY = static_cast<double>(vY) / length; // normalized vector direction Y
+                // edge case when length or dirX is 0
+                if (isnan(dirX)) {
+                    dirX = 0.0;
+                } 
+                // edge case when length or dirY is 0
+                if (isnan(dirY)) {
+                    dirY = 0.0;
                 }
-                if (std::abs(moveCounterY) > 1) {
-                    xdo_move_mouse_relative(xdo, 0, moveCounterY);
-                    moveCounterY = 0;
+                
+                // TODO add as parameters
+                double sensitivityX = 0.08;
+                double sensitivityY = 0.08;
+                double deadzone = 0.1;
+                // TODO length is squared in order to maintain precision when length is low, and to exponentially
+                // increase speed when it's high
+                // any better function to make small movements precise and big movements fast?
+                if (std::abs(dirX) > deadzone) {
+                    accX += dirX * std::pow(length, 2) * delta * sensitivityX;
                 }
+                if (std::abs(dirY) > deadzone) {
+                    accY += dirY * std::pow(length, 2) * delta * sensitivityY;
+                }
+                
+                int movX = 0.0;
+                int movY = 0.0;
+                if (std::abs(accX) >= 1.0) {
+                    movX = accX;
+                    accX = 0.0;
+                }
+                if (std::abs(accY) >= 1.0) {
+                    movY = accY;
+                    accY = 0.0;
+                }
+                
+                xdo_move_mouse_relative(xdo, movX, movY);
             }
         }
         
-        std::this_thread::sleep_for(std::chrono::milliseconds(16));
+        auto t1 = Time::now();
+        d = t1 - t0;
+        delta = d.count();
     }
     
     cleanup(xdo, dev);
