@@ -60,7 +60,71 @@ struct TouchPoint
     int originY;
 };
 
-bool init(xdo_t *&xdo, libevdev *&dev, int &rc) 
+// init xdo and libevdev structs
+bool init(xdo_t *&xdo, libevdev *&dev, int &rc);
+// clea xdo and libevdev structs
+void cleanup(xdo_t *xdo, libevdev *dev);
+// remove touchPoint with given slot
+void removeTouchPoint(std::vector<TouchPoint> &touchPoints, int slot);
+// retrieve touchPoint with given slot
+TouchPoint* getTouchPoint(std::vector<TouchPoint> &touchPoints, int slot);
+// handle libevdev events
+void handleEvents(libevdev *dev, input_event &ev, std::vector<TouchPoint> &touchPoints, int &currentSlot);
+
+int main(int argc, char **argv) {
+    xdo_t *xdo;
+    libevdev *dev = NULL;
+    int rc = 1;
+    if (!init(xdo, dev, rc)) {
+        return 1;
+    }
+    
+    double moveCounterX = 0;
+    double moveCounterY = 0;
+    
+    std::vector<TouchPoint> touchPoints;
+    // MT communication protocol report contact info for each specific slot one slot at a time
+    // first it specifies slot value, if there are more than one contact points, then it sends that slot info
+    int currentSlot = 0;
+    
+    while (1) {
+        do {
+            input_event ev;
+            rc = libevdev_next_event(dev, LIBEVDEV_READ_FLAG_NORMAL, &ev);
+            if (rc == LIBEVDEV_READ_STATUS_SUCCESS) {
+                handleEvents(dev, ev, touchPoints, currentSlot);
+            }
+        } while (rc == LIBEVDEV_READ_STATUS_SYNC || rc == LIBEVDEV_READ_STATUS_SUCCESS);
+        
+        if (touchPoints.size() == 1) {
+            auto tp = getTouchPoint(touchPoints, currentSlot);
+            if (tp) {
+                int dirX = tp->absX - tp->originX;
+                int dirY = tp->absY - tp->originY;
+                double length = std::sqrt(dirX*dirX + dirY*dirY) / 100;
+                
+                moveCounterX += dirX * 0.1 * std::min(1.0, length); // add delta, remove sleep
+                moveCounterY += dirY * 0.1 * std::min(1.0, length); // add delta, remove sleep
+                
+                if (std::abs(moveCounterX) > 1) {
+                    xdo_move_mouse_relative(xdo, moveCounterX, 0);
+                    moveCounterX = 0;
+                }
+                if (std::abs(moveCounterY) > 1) {
+                    xdo_move_mouse_relative(xdo, 0, moveCounterY);
+                    moveCounterY = 0;
+                }
+            }
+        }
+        
+        std::this_thread::sleep_for(std::chrono::milliseconds(16));
+    }
+    
+    cleanup(xdo, dev);
+    return 0;
+}
+
+bool init(xdo_t *&xdo, libevdev *&dev, int &rc)
 {
     // init xdo
     xdo = xdo_new(NULL);
@@ -82,15 +146,6 @@ void cleanup(xdo_t *xdo, libevdev *dev)
 {
     xdo_free(xdo);
     libevdev_free(dev);
-}
-
-int getEventValue(const std::map<int, int> &eventDescriptor, int code)
-{
-    auto it = eventDescriptor.find(code);
-    if (it != eventDescriptor.end()) {
-        return it->second;
-    }
-    return 0;
 }
 
 void removeTouchPoint(std::vector<TouchPoint> &touchPoints, int slot)
@@ -160,57 +215,3 @@ void handleEvents(libevdev *dev, input_event &ev, std::vector<TouchPoint> &touch
       }
     }
 }
-
-int main(int argc, char **argv) {
-    xdo_t *xdo;
-    libevdev *dev = NULL;
-    int rc = 1;
-    if (!init(xdo, dev, rc)) {
-        return 1;
-    }
-    
-    double moveCounterX = 0;
-    double moveCounterY = 0;
-    
-    std::vector<TouchPoint> touchPoints;
-    // MT communication protocol report contact info for each specific slot one slot at a time
-    // first it specifies slot value, if there are more than one contact points, then it sends that slot info
-    int currentSlot = 0;
-    
-    while (1) {
-        do {
-            input_event ev;
-            rc = libevdev_next_event(dev, LIBEVDEV_READ_FLAG_NORMAL, &ev);
-            if (rc == LIBEVDEV_READ_STATUS_SUCCESS) {
-                handleEvents(dev, ev, touchPoints, currentSlot);
-            }
-        } while (rc == LIBEVDEV_READ_STATUS_SYNC || rc == LIBEVDEV_READ_STATUS_SUCCESS);
-        
-        if (touchPoints.size() == 1) {
-            auto tp = getTouchPoint(touchPoints, currentSlot);
-            if (tp) {
-                int dirX = tp->absX - tp->originX;
-                int dirY = tp->absY - tp->originY;
-                double length = std::sqrt(dirX*dirX + dirY*dirY) / 100;
-                
-                moveCounterX += dirX * 0.1 * std::min(1.0, length); // add delta, remove sleep
-                moveCounterY += dirY * 0.1 * std::min(1.0, length); // add delta, remove sleep
-                
-                if (std::abs(moveCounterX) > 1) {
-                    xdo_move_mouse_relative(xdo, moveCounterX, 0);
-                    moveCounterX = 0;
-                }
-                if (std::abs(moveCounterY) > 1) {
-                    xdo_move_mouse_relative(xdo, 0, moveCounterY);
-                    moveCounterY = 0;
-                }
-            }
-        }
-        
-        std::this_thread::sleep_for(std::chrono::milliseconds(16));
-    }
-    
-    cleanup(xdo, dev);
-    return 0;
-}
-
