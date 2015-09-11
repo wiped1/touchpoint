@@ -1,0 +1,6 @@
+// vim specific files
+*.swp
+*.swo
+// kdevelop
+*kdev4*
+/build/
