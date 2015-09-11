@@ -44,7 +44,14 @@ extern "C" {
 
 struct TouchPoint 
 {
-    int id;          // ABS_MT_TRACKING_ID
+    TouchPoint(int slot) 
+        : slot(slot) 
+    { 
+        // TODO better way to represent nullable without boost?
+        pressure = -1;
+        originX = -1;
+        originY = -1;
+    }
     int slot;        // ABS_MT_SLOT
     int pressure;    // ABS_PRESSURE
     int absX;        // ABS_MT_POSITION_X
@@ -114,7 +121,7 @@ void handleEvents(libevdev *dev, input_event &ev, std::vector<TouchPoint> &touch
       case ABS_MT_POSITION_X: {
         if (tp) {
             tp->absX = libevdev_get_event_value(dev, ev.type, ev.code);
-            if (tp->originX == 0) {
+            if (tp->originX == -1) {
                 tp->originX = tp->absX;
             }
         }
@@ -123,7 +130,7 @@ void handleEvents(libevdev *dev, input_event &ev, std::vector<TouchPoint> &touch
       case ABS_MT_POSITION_Y: {
         if (tp) {
             tp->absY = libevdev_get_event_value(dev, ev.type, ev.code);
-            if (tp->originY == 0) {
+            if (tp->originY == -1) {
                 tp->originY = tp->absY;
             }
         }
@@ -140,7 +147,7 @@ void handleEvents(libevdev *dev, input_event &ev, std::vector<TouchPoint> &touch
         if (id == -1) {
             removeTouchPoint(touchPoints, currentSlot);
         } else {
-            touchPoints.push_back(TouchPoint());
+            touchPoints.push_back(TouchPoint(currentSlot));
         }
         break;
       }
@@ -179,7 +186,6 @@ int main(int argc, char **argv) {
             }
         } while (rc == LIBEVDEV_READ_STATUS_SYNC || rc == LIBEVDEV_READ_STATUS_SUCCESS);
         
-        //sprawdzić czemu touch pointy nie są usuwane na bieżąco
         if (touchPoints.size() == 1) {
             auto tp = getTouchPoint(touchPoints, currentSlot);
             if (tp) {
